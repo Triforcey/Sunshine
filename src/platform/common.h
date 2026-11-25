@@ -414,6 +414,15 @@ namespace platf {
      * @brief Capability bit indicating controller touchpad and motion support.
      */
     constexpr caps_t controller_touch = 0x02;  // Controller touch and motion events
+    /**
+     * @brief Capability bit indicating host-side pen re-pacing.
+     *
+     * Advertised only when pen smoothing is enabled: the host re-paces pen
+     * arrivals itself, so cooperating clients (the VoidLink pen-geometry
+     * fork's LI_FF_PEN_FULL_GEOMETRY) skip their sample-loss gates and send
+     * the complete coalesced sample series.
+     */
+    constexpr caps_t full_pen_geometry = 0x04;  // Full-fidelity pen geometry
   };  // namespace platform_caps
 
   /**

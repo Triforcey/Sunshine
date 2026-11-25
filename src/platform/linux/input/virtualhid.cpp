@@ -31,6 +31,9 @@ namespace platf {
     if (virtualhid::configured_gamepad_supports_controller_extensions()) {
       caps |= platform_caps::controller_touch;
     }
+    if (config::input.pen_smoothing) {
+      caps |= platform_caps::full_pen_geometry;
+    }
 
     return caps;
   }
