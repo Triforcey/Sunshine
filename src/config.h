@@ -323,6 +323,7 @@ namespace config {
 
     bool high_resolution_scrolling;  ///< Enable high-resolution mouse-wheel events.
     bool native_pen_touch;  ///< Enable native pen and touch injection.
+    bool pen_smoothing;  ///< Smooth pen input through a paced jitter buffer.
   };
 
   namespace flag {

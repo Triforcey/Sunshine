@@ -753,6 +753,30 @@ consent prompt for directory ACLs, so the Web UI shows setup steps for correctin
     </tr>
 </table>
 
+
+### pen_smoothing
+
+<table>
+    <tr>
+        <td>Description</td>
+        <td colspan="2">
+            When enabled, Sunshine paces pen tablet events through a small jitter buffer, releasing them
+            with even spacing so network burstiness does not translate into angular strokes in drawing
+            applications. Adds a small, bounded latency to pen input.
+        </td>
+    </tr>
+    <tr>
+        <td>Default</td>
+        <td colspan="2">disabled</td>
+    </tr>
+    <tr>
+        <td>Example</td>
+        <td colspan="2">@code{}
+            pen_smoothing = enabled
+            @endcode</td>
+    </tr>
+</table>
+
 ### keybindings
 
 <table>

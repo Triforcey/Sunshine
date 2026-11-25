@@ -17,6 +17,7 @@
 
 // local includes
 #include "src/platform/common.h"
+#include "src/platform/virtualhid_pen_smoothing.h"
 
 namespace platf::virtualhid {
 
@@ -85,6 +86,7 @@ namespace platf::virtualhid {
     std::unique_ptr<lvh::PenTablet> pen;  ///< Per-client pen tablet.
     std::set<std::int32_t> active_touches;  ///< Active touchscreen contacts.
     std::set<lvh::PenButton> pressed_pen_buttons;  ///< Active pen tablet buttons.
+    std::unique_ptr<pen_smoothing_buffer_t> pen_smoothing;  ///< Optional jitter buffer pacing pen events.
   };
 
   /**

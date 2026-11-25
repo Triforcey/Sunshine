@@ -25,6 +25,7 @@
 #include "src/config.h"
 #include "src/logging.h"
 #include "virtualhid_input.h"
+#include "virtualhid_pen_smoothing.h"
 
 using namespace std::literals;
 
@@ -590,6 +591,8 @@ namespace platf::virtualhid {
     refresh_mouse(desktop, viewport);
   }
 
+  void pen_update_direct(client_context_t &context, const touch_port_t &touch_port, const pen_input_t &pen);
+
   client_context_t::client_context_t(input_context_t &input):
       global {&input} {
     if (!global->runtime) {
@@ -620,6 +623,15 @@ namespace platf::virtualhid {
       } else {
         log_failure("create libvirtualhid pen tablet"sv, created.status);
       }
+    }
+
+    // Paced release of pen events smooths network-induced burstiness into
+    // the steady cadence drawing applications expect.
+    if (pen && config::input.pen_smoothing) {
+      pen_smoothing = std::make_unique<pen_smoothing_buffer_t>(
+        [this](const touch_port_t &touch_port, const pen_input_t &pen) {
+          pen_update_direct(*this, touch_port, pen);
+        });
     }
   }
 
@@ -1012,7 +1024,7 @@ namespace platf::virtualhid {
     }
   }
 
-  void pen_update(client_context_t &context, const touch_port_t &touch_port, const pen_input_t &pen) {
+  void pen_update_direct(client_context_t &context, const touch_port_t &touch_port, const pen_input_t &pen) {
     if (!context.pen) {
       return;
     }
@@ -1091,6 +1103,19 @@ namespace platf::virtualhid {
     state.transition = transition;
     state.viewport = pointer_viewport(touch_port);
     log_failure("submit libvirtualhid pen state"sv, context.pen->place_tool(state));
+  }
+
+  void pen_update(client_context_t &context, const touch_port_t &touch_port, const pen_input_t &pen) {
+    if (!context.pen) {
+      return;
+    }
+
+    if (context.pen_smoothing) {
+      context.pen_smoothing->push(touch_port, pen);
+      return;
+    }
+
+    pen_update_direct(context, touch_port, pen);
   }
 
   bool configured_gamepad_supports_touchpad() {
