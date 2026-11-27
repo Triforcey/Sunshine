@@ -209,3 +209,162 @@ TEST(PenSmoothingBufferTest, IdlesQuietlyWithoutInput) {
   }
   EXPECT_EQ(recorder.snapshot().size(), std::size_t {0});
 }
+
+/**
+ * @brief Verify that samples lost between client timestamps are reconstructed.
+ *
+ * Three MOVE samples arrive with a four-interval gap in their session-clock
+ * stamps; the buffer must release the three pushed samples plus three
+ * synthesized ones, with the reconstruction falling between the known
+ * neighbors in order, on evenly spaced client-clock stamps.
+ */
+TEST(PenSmoothingBufferTest, ReconstructsSamplesLostBetweenTimestamps) {
+  release_recorder_t recorder;
+  {
+    pen_smoothing_buffer_t buffer {recorder.callback()};
+
+    const auto stamped = [](std::uint32_t ts, float x) {
+      pen_input_t pen = make_pen(x, 0.0F);
+      pen.eventType = 0x03; // LI_TOUCH_EVENT_MOVE
+      pen.clientTimestamp = ts;
+      return pen;
+    };
+
+    // Seed the cadence with two stamped intervals, then lose three
+    // samples. Start the clock at 1500 us: a zero stamp is the protocol's
+    // 'no timestamp' sentinel, not a real sample time, and history must
+    // not skip the first sample.
+    buffer.push(touch_port_t {}, stamped(1500, 0.10F));
+    buffer.push(touch_port_t {}, stamped(3000, 0.20F));
+    buffer.push(touch_port_t {}, stamped(9000, 0.40F));
+
+    ASSERT_GE(recorder.wait_for(6, std::chrono::milliseconds(2000)), std::size_t {6});
+  }
+
+  const auto samples = recorder.snapshot();
+  ASSERT_EQ(samples.size(), std::size_t {6});
+
+  // The three reconstructed samples sit between the known neighbors, in
+  // order, on evenly spaced client-clock stamps.
+  const auto &s2 = samples[2].pen;
+  const auto &s3 = samples[3].pen;
+  const auto &s4 = samples[4].pen;
+  EXPECT_EQ(s2.clientTimestamp, std::uint32_t {4500});
+  EXPECT_EQ(s3.clientTimestamp, std::uint32_t {6000});
+  EXPECT_EQ(s4.clientTimestamp, std::uint32_t {7500});
+  EXPECT_GT(s2.x, 0.20F);
+  EXPECT_GT(s3.x, s2.x);
+  EXPECT_GT(s4.x, s3.x);
+  EXPECT_LT(s4.x, 0.40F);
+}
+
+/**
+ * @brief Verify that clock discontinuities skip synthesis and reset the baseline.
+ *
+ * A wrap-spanning backwards stamp jump (the send-vs-acquisition offset at
+ * hover/contact transitions) must not fabricate samples, and the pair
+ * after the jump must re-seed the cadence rather than read as a loss gap.
+ */
+TEST(PenSmoothingBufferTest, SkipsSynthesisAcrossClockDiscontinuities) {
+  release_recorder_t recorder;
+  {
+    pen_smoothing_buffer_t buffer {recorder.callback()};
+
+    const auto stamped = [](std::uint32_t ts, float x) {
+      pen_input_t pen = make_pen(x, 0.0F);
+      pen.eventType = 0x03; // LI_TOUCH_EVENT_MOVE
+      pen.clientTimestamp = ts;
+      return pen;
+    };
+
+    // Seed the cadence with one stamped interval.
+    buffer.push(touch_port_t {}, stamped(1500, 0.10F));
+    buffer.push(touch_port_t {}, stamped(3000, 0.20F));
+
+    // Stamps jump backwards by ~25 ms: the wrap-aware delta reads ~2^32 us.
+    buffer.push(touch_port_t {}, stamped(3000U - 25000U, 0.30F));
+
+    // The recovery pair re-seeds the baseline; nothing reconstructs.
+    buffer.push(touch_port_t {}, stamped(3000U - 25000U + 1500U, 0.40F));
+
+    ASSERT_GE(recorder.wait_for(4, std::chrono::milliseconds(2000)), std::size_t {4});
+  }
+
+  const auto samples = recorder.snapshot();
+  ASSERT_EQ(samples.size(), std::size_t {4});
+}
+
+/**
+ * @brief Verify that long forward stalls within the bound reconstruct, capped.
+ *
+ * A 400 ms stall between positional samples is genuine loss: measured live
+ * during sustained drawing, 116-265 ms stalls produced the residual
+ * straight segments the 100 ms bound silently refused. The buffer now
+ * reconstructs forward stalls up to the bound, with the per-gap cap
+ * bounding fabrication.
+ */
+TEST(PenSmoothingBufferTest, ReconstructsLongForwardStalls) {
+  release_recorder_t recorder;
+  {
+    pen_smoothing_buffer_t buffer {recorder.callback()};
+
+    const auto stamped = [](std::uint32_t ts, float x) {
+      pen_input_t pen = make_pen(x, 0.0F);
+      pen.eventType = 0x03; // LI_TOUCH_EVENT_MOVE
+      pen.clientTimestamp = ts;
+      return pen;
+    };
+
+    // Seed the cadence, then a 400 ms stall mid-stroke.
+    buffer.push(touch_port_t {}, stamped(1500, 0.10F));
+    buffer.push(touch_port_t {}, stamped(3000, 0.20F));
+    buffer.push(touch_port_t {}, stamped(403000, 0.30F));
+
+    // 3 pushed + 16 cap-bounded synthesized samples.
+    ASSERT_GE(recorder.wait_for(19, std::chrono::milliseconds(3000)), std::size_t {19});
+  }
+
+  const auto samples = recorder.snapshot();
+  ASSERT_EQ(samples.size(), std::size_t {19});
+
+  // The 16 fills sit between the stall's endpoints, increasing in stamp.
+  const auto &first_fill = samples[2].pen;
+  const auto &last_fill = samples[17].pen;
+  EXPECT_GT(first_fill.clientTimestamp, std::uint32_t {3000});
+  EXPECT_LT(last_fill.clientTimestamp, std::uint32_t {403000});
+  EXPECT_LT(first_fill.clientTimestamp, last_fill.clientTimestamp);
+}
+
+/**
+ * @brief Verify that stalls beyond the bound refuse and reset the baseline.
+ *
+ * A forward stall beyond the reconstruction bound passes through
+ * untouched, logs the skip, and resets the gap baseline; the recovery
+ * pair re-seeds without synthesizing.
+ */
+TEST(PenSmoothingBufferTest, RefusesStallsBeyondTheReconstructionBound) {
+  release_recorder_t recorder;
+  {
+    pen_smoothing_buffer_t buffer {recorder.callback()};
+
+    const auto stamped = [](std::uint32_t ts, float x) {
+      pen_input_t pen = make_pen(x, 0.0F);
+      pen.eventType = 0x03; // LI_TOUCH_EVENT_MOVE
+      pen.clientTimestamp = ts;
+      return pen;
+    };
+
+    // Seed the cadence, then a 600 ms stall beyond the bound.
+    buffer.push(touch_port_t {}, stamped(1500, 0.10F));
+    buffer.push(touch_port_t {}, stamped(3000, 0.20F));
+    buffer.push(touch_port_t {}, stamped(603000, 0.30F));
+
+    // The recovery pair re-seeds the baseline without synthesizing.
+    buffer.push(touch_port_t {}, stamped(604500, 0.40F));
+
+    ASSERT_GE(recorder.wait_for(4, std::chrono::milliseconds(2000)), std::size_t {4});
+  }
+
+  const auto samples = recorder.snapshot();
+  ASSERT_EQ(samples.size(), std::size_t {4});
+}

@@ -7,6 +7,7 @@
 // standard includes
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -94,6 +95,9 @@ namespace platf::virtualhid {
     void push(const touch_port_t &touch_port, const pen_input_t &pen) {
       const auto now = clock_();
       std::lock_guard lock {mtx_};
+
+      synthesize_missing_samples(touch_port, pen);
+
       if (last_arrival_) {
         const auto delta = std::chrono::duration<double, std::nano>(now - *last_arrival_).count();
         const auto clamped = std::clamp(delta, kMinIntervalNanos, kMaxIntervalNanos);
@@ -102,6 +106,8 @@ namespace platf::virtualhid {
         interval_ewma_ = std::chrono::nanoseconds {static_cast<std::int64_t>(next)};
       }
       last_arrival_ = now;
+      remember_timestamp_history(pen);
+      ++pushed_count_;
       queue_.push_back({touch_port, pen, now});
       cv_.notify_all();
     }
@@ -178,6 +184,182 @@ namespace platf::virtualhid {
       }
     }
 
+    /**
+     * @brief Whether an event type carries only positional updates.
+     *
+     * Mirrors LI_TOUCH_EVENT_HOVER (0x00) and LI_TOUCH_EVENT_MOVE (0x03)
+     * from moonlight-common-c; kept private so this header stays
+     * self-contained for unit tests.
+     *
+     * @param event_type Moonlight pen event type.
+     * @return True when the event only moves the pen.
+     */
+    static bool
+    is_positional_event(std::uint8_t event_type) {
+      return event_type == kHoverEvent || event_type == kMoveEvent;
+    }
+
+    /**
+     * @brief Update the client cadence average with an in-cadence interval.
+     *
+     * @param delta_us Interval between consecutive client timestamps, in microseconds.
+     */
+    void
+    update_client_cadence(double delta_us) {
+      const auto clamped = std::clamp(delta_us, kMinClientCadenceUs, kMaxClientCadenceUs);
+      client_cadence_us_ = client_cadence_seeded_
+          ? (kClientEwmaAlpha * clamped) + ((1.0 - kClientEwmaAlpha) * client_cadence_us_)
+          : clamped;
+      client_cadence_seeded_ = true;
+    }
+
+    /**
+     * @brief Reconstruct pen samples lost in transit between timestamped samples.
+     *
+     * Input travels over unacknowledged UDP, so congestion drops position
+     * samples; the drawing application then chords across the gap. When the
+     * client session-clock gap between consecutive timestamped samples
+     * exceeds the learned cadence, synthesize the missing positions with a
+     * cubic Hermite spline through the known neighborhood so the stroke
+     * curves instead of chords. Only interpolates within runs of positional
+     * events with unchanged buttons and tool type; a gap never crosses a
+     * state change.
+     *
+     * @param touch_port Touch port snapshot for the incoming sample.
+     * @param pen The newly arrived pen sample.
+     */
+    void
+    synthesize_missing_samples(const touch_port_t &touch_port, const pen_input_t &pen) {
+      if (pen.clientTimestamp == 0 || !client_prev_pen_ || !is_positional_event(client_prev_pen_->eventType) ||
+          !is_positional_event(pen.eventType) || client_prev_pen_->penButtons != pen.penButtons ||
+          client_prev_pen_->toolType != pen.toolType) {
+        return;
+      }
+
+      // Wrap-aware interval on the 32-bit client session clock.
+      const auto delta_us = static_cast<double>(pen.clientTimestamp - client_prev_ts_);
+
+      if (!client_cadence_seeded_) {
+        // Seed the cadence from the first observed interval so a steady
+        // client cadence can never read as perpetual loss: the gap test
+        // measures against the learned baseline, and with acquisition
+        // stamps the baseline is the true delivery rate. Until a client
+        // has delivered two samples there is no baseline to measure a
+        // gap against.
+        update_client_cadence(delta_us);
+        return;
+      }
+
+      if (delta_us <= kGapCadenceFactor * client_cadence_us_) {
+        update_client_cadence(delta_us);
+        return;
+      }
+
+      // Deltas far beyond the learned cadence are discontinuities, not
+      // loss: client clock-domain switches or session starts jump stamps
+      // by whole seconds (mixed-stamping builds produced wrap-spanning
+      // ~2^32 us deltas at every contact/hover transition), and
+      // interpolating across them fabricates geometry. Pass through.
+      if (delta_us > kMaxReconstructableGapUs) {
+        // Discontinuity: reset the gap baseline so the offset-recovery
+        // pair after a clock or event-source switch re-seeds the cadence
+        // instead of reading as a plausible multi-frame gap.
+        client_cadence_seeded_ = false;
+        return;
+      }
+
+      const auto missing = static_cast<std::size_t>(std::lround(delta_us / client_cadence_us_)) - 1;
+      if (missing == 0) {
+        return;
+      }
+      const auto count = std::min(missing, kMaxSynthesizedPerGap);
+
+      const auto &before = client_before_pen_ ? *client_before_pen_ : *client_prev_pen_;
+      const auto &left = *client_prev_pen_;
+      const auto &right = pen;
+
+      for (std::size_t i = 1; i <= count; ++i) {
+        const auto t = static_cast<double>(i) / static_cast<double>(count + 1);
+        pen_input_t fill = left;
+        fill.x = static_cast<float>(hermite(before.x, left.x, right.x, t));
+        fill.y = static_cast<float>(hermite(before.y, left.y, right.y, t));
+        fill.pressureOrDistance = static_cast<float>(lerp(left.pressureOrDistance, right.pressureOrDistance, t));
+        fill.contactAreaMajor = static_cast<float>(lerp(left.contactAreaMajor, right.contactAreaMajor, t));
+        fill.contactAreaMinor = static_cast<float>(lerp(left.contactAreaMinor, right.contactAreaMinor, t));
+        fill.rotation = static_cast<std::uint16_t>(std::lround(lerp(left.rotation, right.rotation, t)));
+        fill.tilt = static_cast<std::uint8_t>(std::lround(lerp(left.tilt, right.tilt, t)));
+        fill.clientTimestamp = client_prev_ts_ + static_cast<std::uint32_t>(delta_us * t);
+        queue_.push_back({touch_port, fill, clock_()});
+        ++synthesized_count_;
+      }
+      ++gap_count_;
+    }
+
+    /**
+     * @brief Remember the previous timestamped sample for gap reconstruction.
+     *
+     * @param pen The pen sample just queued.
+     */
+    void
+    remember_timestamp_history(const pen_input_t &pen) {
+      if (pen.clientTimestamp == 0) {
+        return; // Legacy packets carry no session clock; leave history intact.
+      }
+      if (client_prev_pen_) {
+        client_before_pen_ = client_prev_pen_;
+      }
+      client_prev_pen_ = pen;
+      client_prev_ts_ = pen.clientTimestamp;
+    }
+
+    /**
+     * @brief Cubic Hermite interpolation for loss reconstruction.
+     *
+     * The left tangent uses the sample before the gap's left neighbor when
+     * available (Catmull-Rom form); the right tangent is clamped to the
+     * chord.
+     *
+     * @param before Coordinate before the gap's left neighbor.
+     * @param left Left neighbor of the gap.
+     * @param right Right neighbor of the gap.
+     * @param t Normalized position within the gap, in [0, 1].
+     * @return The interpolated coordinate.
+     */
+    static double
+    hermite(double before, double left, double right, double t) {
+      const double m_left = (right - before) * 0.5;
+      const double m_right = (right - left) * 0.5;
+      const double t2 = t * t;
+      const double t3 = t2 * t;
+      const double h00 = (2 * t3) - (3 * t2) + 1;
+      const double h10 = t3 - (2 * t2) + t;
+      const double h01 = (-2 * t3) + (3 * t2);
+      const double h11 = t3 - t2;
+      return (h00 * left) + (h10 * m_left) + (h01 * right) + (h11 * m_right);
+    }
+
+    /**
+     * @brief Linear interpolation helper.
+     *
+     * @param a Start value.
+     * @param b End value.
+     * @param t Normalized position, in [0, 1].
+     * @return The interpolated value.
+     */
+    static double
+    lerp(double a, double b, double t) {
+      return a + ((b - a) * t);
+    }
+
+    static constexpr std::uint8_t kHoverEvent = 0x00;  ///< LI_TOUCH_EVENT_HOVER, mirrored from moonlight-common-c.
+    static constexpr std::uint8_t kMoveEvent = 0x03;  ///< LI_TOUCH_EVENT_MOVE, mirrored from moonlight-common-c.
+    static constexpr double kClientEwmaAlpha = 0.1;  ///< Weight of the newest interval in the client cadence average.
+    static constexpr double kGapCadenceFactor = 2.0;  ///< Client-clock gap beyond this multiple of cadence reads as loss.
+    static constexpr double kMinClientCadenceUs = 1'000.0;  ///< Client cadence floor: 1 ms.
+    static constexpr double kMaxClientCadenceUs = 100'000.0;  ///< Client cadence ceiling: 100 ms.
+    static constexpr double kInitialClientCadenceUs = 1'500.0;  ///< Client cadence prior to the first stamped interval.
+    static constexpr std::size_t kMaxSynthesizedPerGap = 16;  ///< Reconstructed samples per gap; wider gaps fill partially.
+    static constexpr double kMaxReconstructableGapUs = 500'000.0;  ///< Forward stalls up to 500 ms reconstruct (cap-bounded); beyond that, discontinuity.
     static constexpr double kEwmaAlpha = 0.1;  ///< Weight of the newest interval in the pacing average.
     static constexpr double kMinIntervalNanos = 1.0e6;  ///< Pacing interval floor: 1 ms.
     static constexpr double kMaxIntervalNanos = 1.0e8;  ///< Pacing interval ceiling: 100 ms.
@@ -191,6 +373,14 @@ namespace platf::virtualhid {
     std::deque<sample_t> queue_;  ///< Pending samples in arrival order.
     std::chrono::nanoseconds interval_ewma_ {kDefaultInterval};  ///< Pacing interval average.
     std::optional<time_point_t> last_arrival_;  ///< Previous push time for the average.
+    std::optional<pen_input_t> client_prev_pen_;  ///< Previous timestamped sample, for gap reconstruction.
+    std::optional<pen_input_t> client_before_pen_;  ///< Sample before that, for spline tangents.
+    std::uint32_t client_prev_ts_ = 0;  ///< Previous sample's client session-clock timestamp.
+    double client_cadence_us_ = kInitialClientCadenceUs;  ///< EWMA of stamped client intervals, in microseconds.
+    bool client_cadence_seeded_ = false;  ///< Whether the cadence average has observed an interval.
+    std::uint64_t pushed_count_ = 0;  ///< Samples queued from the client (session lifetime).
+    std::uint64_t synthesized_count_ = 0;  ///< Samples reconstructed across loss gaps (session lifetime).
+    std::uint64_t gap_count_ = 0;  ///< Timestamp gaps detected (session lifetime).
     time_point_t last_release_;  ///< Previous release time for pacing.
     std::jthread thread_;  ///< Drain thread performing paced releases.
   };

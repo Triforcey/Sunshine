@@ -1,0 +1,71 @@
+[2026-11-26 22:38:05.535]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:108
+[2026-11-26 22:38:05.535]: Tests:   PenSmoothingBufferTest/PassesSingleSampleThrough started
+[2026-11-26 22:38:05.537]: Info: pen smoothing session: 1 samples received, 0 reconstructed across 0 gaps, 0 depth-valve overflows
+[2026-11-26 22:38:05.538]: Tests: PenSmoothingBufferTest/PassesSingleSampleThrough passed
+[2026-11-26 22:38:05.538]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:122
+[2026-11-26 22:38:05.538]: Tests:   PenSmoothingBufferTest/PreservesArrivalOrder started
+[2026-11-26 22:38:05.584]: Info: pen smoothing session: 5 samples received, 0 reconstructed across 0 gaps, 0 depth-valve overflows
+[2026-11-26 22:38:05.584]: Tests: PenSmoothingBufferTest/PreservesArrivalOrder passed
+[2026-11-26 22:38:05.584]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:139
+[2026-11-26 22:38:05.584]: Tests:   PenSmoothingBufferTest/StretchesBurstInsteadOfDumpingIt started
+[2026-11-26 22:38:05.634]: Info: pen smoothing session: 6 samples received, 0 reconstructed across 0 gaps, 0 depth-valve overflows
+[2026-11-26 22:38:05.634]: Tests: PenSmoothingBufferTest/StretchesBurstInsteadOfDumpingIt passed
+[2026-11-26 22:38:05.634]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:162
+[2026-11-26 22:38:05.634]: Tests:   PenSmoothingBufferTest/BoundsBacklogLatency started
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 19 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 18 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 17 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 16 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 15 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 14 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 13 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 12 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 11 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 10 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 9 queued samples unpaced
+[2026-11-26 22:38:05.635]: Debug: pen smoothing: depth valve draining 8 queued samples unpaced
+[2026-11-26 22:38:05.658]: Info: pen smoothing session: 20 samples received, 0 reconstructed across 0 gaps, 12 depth-valve overflows
+[2026-11-26 22:38:05.658]: Tests: PenSmoothingBufferTest/BoundsBacklogLatency passed
+[2026-11-26 22:38:05.658]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:177
+[2026-11-26 22:38:05.658]: Tests:   PenSmoothingBufferTest/FlushReleasesPendingSamples started
+[2026-11-26 22:38:05.658]: Info: pen smoothing session: 3 samples received, 0 reconstructed across 0 gaps, 0 depth-valve overflows
+[2026-11-26 22:38:05.658]: Tests: PenSmoothingBufferTest/FlushReleasesPendingSamples passed
+[2026-11-26 22:38:05.658]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:189
+[2026-11-26 22:38:05.658]: Tests:   PenSmoothingBufferTest/FlushesOnDestruction started
+[2026-11-26 22:38:05.658]: Info: pen smoothing session: 3 samples received, 0 reconstructed across 0 gaps, 0 depth-valve overflows
+[2026-11-26 22:38:05.658]: Tests: PenSmoothingBufferTest/FlushesOnDestruction passed
+[2026-11-26 22:38:05.658]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:203
+[2026-11-26 22:38:05.658]: Tests:   PenSmoothingBufferTest/IdlesQuietlyWithoutInput started
+[2026-11-26 22:38:05.709]: Info: pen smoothing session: 0 samples received, 0 reconstructed across 0 gaps, 0 depth-valve overflows
+[2026-11-26 22:38:05.709]: Tests: PenSmoothingBufferTest/IdlesQuietlyWithoutInput passed
+[2026-11-26 22:38:05.709]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:221
+[2026-11-26 22:38:05.709]: Tests:   PenSmoothingBufferTest/ReconstructsSamplesLostBetweenTimestamps started
+[2026-11-26 22:38:05.709]: Info: pen smoothing: reconstructing 3 of 3 samples across a 6000 us gap (cadence 1500 us)
+[2026-11-26 22:38:05.777]: Info: pen smoothing session: 3 samples received, 3 reconstructed across 1 gaps, 0 depth-valve overflows
+[2026-11-26 22:38:05.777]: Tests: PenSmoothingBufferTest/ReconstructsSamplesLostBetweenTimestamps passed
+[2026-11-26 22:38:05.777]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:268
+[2026-11-26 22:38:05.777]: Tests:   PenSmoothingBufferTest/SkipsSynthesisAcrossClockDiscontinuities started
+[2026-11-26 22:38:05.777]: Info: pen smoothing: 4294942296 us stamp jump treated as discontinuity, baseline reset
+[2026-11-26 22:38:05.816]: Info: pen smoothing session: 4 samples received, 0 reconstructed across 0 gaps, 0 depth-valve overflows
+[2026-11-26 22:38:05.816]: Tests: PenSmoothingBufferTest/SkipsSynthesisAcrossClockDiscontinuities passed
+[2026-11-26 22:38:05.816]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:306
+[2026-11-26 22:38:05.816]: Tests:   PenSmoothingBufferTest/ReconstructsLongForwardStalls started
+[2026-11-26 22:38:05.816]: Info: pen smoothing: reconstructing 16 of 266 samples across a 400000 us gap (cadence 1500 us)
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 18 queued samples unpaced
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 17 queued samples unpaced
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 16 queued samples unpaced
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 15 queued samples unpaced
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 14 queued samples unpaced
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 13 queued samples unpaced
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 12 queued samples unpaced
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 11 queued samples unpaced
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 10 queued samples unpaced
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 9 queued samples unpaced
+[2026-11-26 22:38:05.816]: Debug: pen smoothing: depth valve draining 8 queued samples unpaced
+[2026-11-26 22:38:05.911]: Info: pen smoothing session: 3 samples received, 16 reconstructed across 1 gaps, 11 depth-valve overflows
+[2026-11-26 22:38:05.912]: Tests: PenSmoothingBufferTest/ReconstructsLongForwardStalls passed
+[2026-11-26 22:38:05.912]: Tests: From /home/mocoy/Projects/Code/Sunshine-pen-jitter/tests/integration/test_pen_smoothing.cpp:345
+[2026-11-26 22:38:05.912]: Tests:   PenSmoothingBufferTest/RefusesStallsBeyondTheReconstructionBound started
+[2026-11-26 22:38:05.912]: Info: pen smoothing: 600000 us stamp jump treated as discontinuity, baseline reset
+[2026-11-26 22:38:05.950]: Info: pen smoothing session: 4 samples received, 0 reconstructed across 0 gaps, 0 depth-valve overflows
+[2026-11-26 22:38:05.950]: Tests: PenSmoothingBufferTest/RefusesStallsBeyondTheReconstructionBound passed

@@ -524,6 +524,7 @@ namespace platf {
     float pressureOrDistance;  ///< Distance for hover and pressure for contact.
     float contactAreaMajor;  ///< Major axis of the reported contact area.
     float contactAreaMinor;  ///< Minor axis of the reported contact area.
+    std::uint32_t clientTimestamp;  ///< Client session-clock timestamp in microseconds; 0 when absent.
   };
 
   /**

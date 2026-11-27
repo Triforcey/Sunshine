@@ -1554,6 +1554,33 @@ namespace input {
     platf::touch_update(input->client_context.get(), pointer_data->touch_port, touch);
   }
 
+  // Extended pen packet carrying the client session-clock timestamp (µs).
+  // Mirrors the timestamped client fork's wire layout; upstream
+  // moonlight-common-c does not define this variant. Clients only send it
+  // after the host advertises x-ss-general.penTimestamps in the RTSP
+  // handshake, which this build does when pen_smoothing is enabled.
+#pragma pack(push, 1)
+#define SS_PEN_TIMESTAMPED_MAGIC 0x5500000F
+  typedef struct _SS_PEN_TIMESTAMPED_PACKET {
+    NV_INPUT_HEADER header;
+    uint8_t eventType;
+    uint8_t toolType;
+    uint8_t penButtons;
+    uint8_t zero[1]; // Alignment/reserved
+    netfloat x;
+    netfloat y;
+    netfloat pressureOrDistance;
+    uint16_t rotation; // Stylus azimuth, in degrees
+    uint8_t tilt;
+    uint8_t zero2[1];
+    netfloat contactAreaMajor;
+    netfloat contactAreaMinor;
+    uint16_t barrelRoll; // Stylus barrel roll, in degrees
+    uint16_t zero3[1]; // Alignment/reserved
+    uint32_t clientTimestamp; // Client session clock, in microseconds
+  } SS_PEN_TIMESTAMPED_PACKET, *PSS_PEN_TIMESTAMPED_PACKET;
+#pragma pack(pop)
+
   /**
    * @brief Called to pass a pen message to the platform backend.
    * @param input The input context pointer.
@@ -1576,6 +1603,34 @@ namespace input {
       from_clamped_netfloat(packet->pressureOrDistance, 0.0f, 1.0f),
       pointer_data->contact_area.first,
       pointer_data->contact_area.second,
+    };
+
+    platf::pen_update(input->client_context.get(), pointer_data->touch_port, pen);
+  }
+
+  /**
+   * @brief Called to pass a timestamped pen message to the platform backend.
+   * @param input The input context pointer.
+   * @param packet The timestamped pen packet.
+   */
+  void passthrough(std::shared_ptr<input_t> &input, PSS_PEN_TIMESTAMPED_PACKET packet) {
+    const auto pointer_data = prepare_absolute_pointer_data(input, packet);
+    if (!pointer_data) {
+      return;
+    }
+
+    platf::pen_input_t pen {
+      packet->eventType,
+      packet->toolType,
+      packet->penButtons,
+      packet->tilt,
+      pointer_data->rotation,
+      pointer_data->coords.first,
+      pointer_data->coords.second,
+      from_clamped_netfloat(packet->pressureOrDistance, 0.0f, 1.0f),
+      pointer_data->contact_area.first,
+      pointer_data->contact_area.second,
+      util::endian::little(packet->clientTimestamp),
     };
 
     platf::pen_update(input->client_context.get(), pointer_data->touch_port, pen);
@@ -1852,6 +1907,8 @@ namespace input {
         return validate_fixed_input_packet<SS_TOUCH_PACKET>(packet, declared_size);
       case SS_PEN_MAGIC:
         return validate_fixed_input_packet<SS_PEN_PACKET>(packet, declared_size);
+      case SS_PEN_TIMESTAMPED_MAGIC:
+        return validate_fixed_input_packet<SS_PEN_TIMESTAMPED_PACKET>(packet, declared_size);
       case SS_CONTROLLER_ARRIVAL_MAGIC:
         return validate_fixed_input_packet<SS_CONTROLLER_ARRIVAL_PACKET>(packet, declared_size);
       case SS_CONTROLLER_TOUCH_MAGIC:
@@ -2141,6 +2198,9 @@ namespace input {
         return batch((PSS_TOUCH_PACKET) dest, (PSS_TOUCH_PACKET) src);
       case SS_PEN_MAGIC:
         return batch((PSS_PEN_PACKET) dest, (PSS_PEN_PACKET) src);
+      case SS_PEN_TIMESTAMPED_MAGIC:
+        // Never batch: every timestamped sample feeds loss reconstruction.
+        return batch_result_e::terminate_batch;
       case SS_CONTROLLER_TOUCH_MAGIC:
         return batch((PSS_CONTROLLER_TOUCH_PACKET) dest, (PSS_CONTROLLER_TOUCH_PACKET) src);
       case SS_CONTROLLER_MOTION_MAGIC:
@@ -2263,6 +2323,9 @@ namespace input {
         break;
       case SS_PEN_MAGIC:
         passthrough(input, (PSS_PEN_PACKET) payload);
+        break;
+      case SS_PEN_TIMESTAMPED_MAGIC:
+        passthrough(input, (PSS_PEN_TIMESTAMPED_PACKET) payload);
         break;
       case SS_CONTROLLER_ARRIVAL_MAGIC:
         passthrough(input, (PSS_CONTROLLER_ARRIVAL_PACKET) payload);
