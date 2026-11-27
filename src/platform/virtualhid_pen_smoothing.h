@@ -19,6 +19,7 @@
 #include <utility>
 
 // local includes
+#include "src/logging.h"
 #include "src/platform/common.h"
 
 namespace platf::virtualhid {
@@ -76,6 +77,10 @@ namespace platf::virtualhid {
       flush();
       thread_.request_stop();
       cv_.notify_all();
+      thread_.join();
+      BOOST_LOG(info) << "pen smoothing session: " << pushed_count_ << " samples received, "
+                      << synthesized_count_ << " reconstructed across " << gap_count_
+                      << " gaps, " << valve_overflow_count_ << " depth-valve overflows";
     }
 
     pen_smoothing_buffer_t(const pen_smoothing_buffer_t &) = delete;
@@ -170,6 +175,11 @@ namespace platf::virtualhid {
         const auto earliest = last_release_ + interval_ewma_;
         // Depth valve: pace only while the queue fits the pacing window;
         // drain overflow without pacing so added latency stays bounded.
+        if (queue_.size() >= kMaxQueuedDepth && now < earliest) {
+          ++valve_overflow_count_;
+          BOOST_LOG(debug) << "pen smoothing: depth valve draining " << queue_.size()
+                           << " queued samples unpaced";
+        }
         if (queue_.size() < kMaxQueuedDepth && now < earliest) {
           cv_.wait_until(lock, earliest);
           continue;
@@ -263,7 +273,13 @@ namespace platf::virtualhid {
       if (delta_us > kMaxReconstructableGapUs) {
         // Discontinuity: reset the gap baseline so the offset-recovery
         // pair after a clock or event-source switch re-seeds the cadence
-        // instead of reading as a plausible multi-frame gap.
+        // instead of reading as a plausible multi-frame gap. Clock
+        // artifacts (backwards wrap-spanning stamp jumps at hover/contact
+        // transitions) read as billions of microseconds; genuine forward
+        // stalls measured live during sustained drawing reach 116-265 ms
+        // and stay far below the bound, so they reconstruct above.
+        BOOST_LOG(info) << "pen smoothing: " << static_cast<std::uint64_t>(delta_us)
+                        << " us stamp jump treated as discontinuity, baseline reset";
         client_cadence_seeded_ = false;
         return;
       }
@@ -273,6 +289,10 @@ namespace platf::virtualhid {
         return;
       }
       const auto count = std::min(missing, kMaxSynthesizedPerGap);
+
+      BOOST_LOG(info) << "pen smoothing: reconstructing " << count << " of " << missing
+                      << " samples across a " << static_cast<std::uint64_t>(delta_us) << " us gap (cadence "
+                      << client_cadence_us_ << " us)";
 
       const auto &before = client_before_pen_ ? *client_before_pen_ : *client_prev_pen_;
       const auto &left = *client_prev_pen_;
@@ -381,6 +401,7 @@ namespace platf::virtualhid {
     std::uint64_t pushed_count_ = 0;  ///< Samples queued from the client (session lifetime).
     std::uint64_t synthesized_count_ = 0;  ///< Samples reconstructed across loss gaps (session lifetime).
     std::uint64_t gap_count_ = 0;  ///< Timestamp gaps detected (session lifetime).
+    std::uint64_t valve_overflow_count_ = 0;  ///< Times the depth valve drained overflow unpaced (session lifetime).
     time_point_t last_release_;  ///< Previous release time for pacing.
     std::jthread thread_;  ///< Drain thread performing paced releases.
   };
