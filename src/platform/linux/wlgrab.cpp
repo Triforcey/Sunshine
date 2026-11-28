@@ -358,11 +358,21 @@ namespace wl {
       }
 
       mem_type = hwdevice_type;
+      // Prefer linear capture for VA-API on Adreno: matches the cross-GPU CUDA
+      // intent (vendor-tiled buffers are import-hostile) and keeps the capture
+      // path independent of compositor-advertised vendor modifiers. Must live
+      // outside SUNSHINE_BUILD_CUDA (builds without CUDA never see it).
+      if (mem_type == platf::mem_type_e::vaapi) {
+        prefer_linear_capture = true;
+      }
+      BOOST_LOG(info) << "[wlgrab] init mem_type="sv << (int) mem_type << " prefer_linear="sv << (prefer_linear_capture ? 1 : 0);
 #ifdef SUNSHINE_BUILD_CUDA
       // Cross-GPU NVENC cannot import tiled dmabufs, so resolve once here whether capture
       // must allocate linear buffers instead. The render node cannot change mid-stream, and
       // snapshot() runs per frame and must not redo device queries (or repeat warnings) per frame.
-      prefer_linear_capture = mem_type == platf::mem_type_e::cuda && !capture_node_is_cuda_device();
+      if (mem_type == platf::mem_type_e::cuda && !capture_node_is_cuda_device()) {
+        prefer_linear_capture = true;
+      }
 #endif
 
       if (display.init()) {

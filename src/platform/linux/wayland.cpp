@@ -370,7 +370,10 @@ namespace wl {
   }
 
   bool should_attempt_linear_copy(bool prefer_linear_copy, const std::vector<std::uint64_t> &modifiers) {
-    return prefer_linear_copy && std::find(modifiers.begin(), modifiers.end(), DRM_FORMAT_MOD_LINEAR) != modifiers.end();
+    // hl-dev: gbm never advertises DRM_FORMAT_MOD_LINEAR in dmabuf feedback,
+    // so requiring it here makes linear capture unreachable on Adreno. The
+    // caller falls back to compositor modifiers if the linear allocation fails.
+    return prefer_linear_copy;
   }
 
   const std::vector<std::uint64_t> *find_advertised_modifiers(const std::map<std::uint32_t, std::vector<std::uint64_t>> *modifiers, std::uint32_t format) {
@@ -652,21 +655,27 @@ namespace wl {
 
     // Create GBM buffer - prefer encoder-intersected modifiers when available
     const std::map<std::uint32_t, std::vector<std::uint64_t>> *modifiers_to_use = encoder_modifiers ? encoder_modifiers : supported_modifiers;
-    if (const auto *advertised = find_advertised_modifiers(modifiers_to_use, dmabuf_info.format); advertised) {
-      if (should_attempt_linear_copy(prefer_linear_copy, *advertised)) {
-        // Cross-GPU encode (e.g. NVENC on a headless NVIDIA GPU while the compositor
-        // renders on AMD/Intel) cannot import vendor-tiled modifiers, so request a
-        // linear buffer the encoder is guaranteed to import instead. Note: no
-        // GBM_BO_USE_LINEAR here, Mesa rejects that flag with modifiers2.
-        constexpr std::uint64_t linear_modifier = DRM_FORMAT_MOD_LINEAR;
-        current_bo = gbm_bo_create_with_modifiers2(gbm.get(), dmabuf_info.width, dmabuf_info.height, dmabuf_info.format, &linear_modifier, 1, GBM_BO_USE_RENDERING);
-        if (!current_bo) {
-          BOOST_LOG(debug) << "Linear screencopy buffer unavailable, falling back to compositor modifiers"sv;
-        }
-      }
+    const auto *advertised = find_advertised_modifiers(modifiers_to_use, dmabuf_info.format);
+    if (should_attempt_linear_copy(prefer_linear_copy, {})) {
+      // Prefer a linear capture buffer. gbm never advertises
+      // DRM_FORMAT_MOD_LINEAR in dmabuf feedback, so the attempt must not be
+      // gated on the advertised list: vendor-tiled (e.g. UBWC) buffers are
+      // import-hostile for cross-GPU encode, and a linear buffer keeps the
+      // capture path independent of compositor-advertised modifiers.
+      constexpr std::uint64_t linear_modifier = DRM_FORMAT_MOD_LINEAR;
+      current_bo = gbm_bo_create_with_modifiers2(gbm.get(), dmabuf_info.width, dmabuf_info.height, dmabuf_info.format, &linear_modifier, 1, GBM_BO_USE_RENDERING);
       if (!current_bo) {
-        current_bo = gbm_bo_create_with_modifiers2(gbm.get(), dmabuf_info.width, dmabuf_info.height, dmabuf_info.format, advertised->data(), advertised->size(), GBM_BO_USE_RENDERING);
+        BOOST_LOG(debug) << "Linear modifier allocation failed, trying GBM_BO_USE_LINEAR"sv;
+        current_bo = gbm_bo_create(gbm.get(), dmabuf_info.width, dmabuf_info.height, dmabuf_info.format, GBM_BO_USE_LINEAR | GBM_BO_USE_RENDERING);
       }
+      if (current_bo) {
+        BOOST_LOG(info) << "[hl-dev] linear capture buffer allocated"sv;
+      } else {
+        BOOST_LOG(debug) << "Linear capture unavailable, falling back to advertised/compositor modifiers"sv;
+      }
+    }
+    if (!current_bo && advertised) {
+      current_bo = gbm_bo_create_with_modifiers2(gbm.get(), dmabuf_info.width, dmabuf_info.height, dmabuf_info.format, advertised->data(), advertised->size(), GBM_BO_USE_RENDERING);
     }
 
     if (!current_bo) {
